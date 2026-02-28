@@ -1,0 +1,18 @@
+# Virtuálne prostredie (toto zaberá stovky MB a na GitHub nepatrí)
+.venv/
+venv/
+env/
+bin/
+lib/
+share/
+
+# Heslá a API kľúče (NAJDÔLEŽITEJŠIE!)
+.env
+
+# Python vyrovnávacia pamäť
+__pycache__/
+*.py[cod]
+
+# Systémové súbory
+.DS_Store
+Thumbs.db
