@@ -16,3 +16,25 @@ __pycache__/
 # Systémové súbory
 .DS_Store
 Thumbs.db
+
+# Byte-compiled / optimized / DLL files
+*.pyo
+*.pyd
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# logs and local files
+.pytest_cache/
+logs/
+*.log
+
+# Editor directories and files
+.vscode/
+/.idea/
+
+# macOS
+.Spotlight-V100
+.Trashes

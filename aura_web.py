@@ -3,191 +3,88 @@ import google.generativeai as genai
 import os
 from dotenv import load_dotenv
 from PIL import Image
-import io
-try:
-    import PyPDF2
-except Exception:
-    PyPDF2 = None
-try:
-    import pytesseract
-except Exception:
-    pytesseract = None
-import time
-from google.api_core import exceptions as api_exceptions
 
-# 1. NASTAVENIA A PAMÄŤ
+# 1. NASTAVENIA
 load_dotenv()
-# fallback: najprv GOOGLE_API_KEY, potom API_KEY
-api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("API_KEY")
-if api_key:
-    genai.configure(api_key=api_key)
-else:
-    st.error("Chýba API kľúč! Nastav GOOGLE_API_KEY alebo API_KEY v .env")
+API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# Poradie modelov (fallback pri kvótach / NotFound)
-model_candidates = [
-    "models/text-bison-001",           # text-focused model (commonly available)
-    "models/gemini-2.5-pro",
-    "models/gemini-2.5-flash",
-    "models/gemini-flash-latest",
-    "models/gemini-flash-lite",
-]
+if not API_KEY:
+    st.error("❌ Chýba API kľúč v súbore .env! Prosím, pridaj ho.")
+    st.stop()
 
-st.set_page_config(page_title="Aura AI", page_icon="🛡️", layout="wide")
+genai.configure(api_key=API_KEY)
 
-# Inicializácia histórie (Session State)
+# Konfigurácia stránky
+st.set_page_config(page_title="Aura AI - Ochranár", page_icon="🛡️", layout="wide")
+
+# Inicializácia histórie v pamäti prehliadača
 if 'history' not in st.session_state:
     st.session_state['history'] = []
 
-# --- BOČNÝ PANEL (PROFIL A HISTÓRIA) ---
+# --- BOČNÝ PANEL ---
 with st.sidebar:
     st.title("👤 Profil používateľa")
-    # Tu sú polia, ktoré si chcel doplniť
-    user_name = st.text_input("Meno", placeholder="Tvoje meno")
-    user_email = st.text_input("E-mail", placeholder="priklad@mail.sk")
-    user_age = st.number_input("Vek", min_value=0, max_value=120, value=25)
+    u_name = st.text_input("Meno", value="Používateľ")
+    u_email = st.text_input("E-mail", placeholder="email@priklad.sk")
     
     st.divider()
-    st.subheader("📜 Moja história")
+    st.subheader("📜 História analýz")
     if st.session_state['history']:
-        for i, item in enumerate(reversed(st.session_state['history'])):
-            st.write(f"{len(st.session_state['history'])-i}. {item}")
-        
-        if st.button("Vymazať všetko"):
+        for i, entry in enumerate(reversed(st.session_state['history'])):
+            st.info(f"{entry}")
+        if st.button("Vymazať históriu"):
             st.session_state['history'] = []
             st.rerun()
     else:
-        st.info("Zatiaľ žiadna aktivita.")
+        st.write("Zatiaľ žiadna aktivita.")
 
-# --- HLAVNÁ ČASŤ APLIKÁCIE ---
-st.title(f"🛡️ Aura")
-if 'user_name' in locals() and user_name:
-    st.write(f"Vitaj, **{user_name}**. Som pripravená ťa chrániť.")
-else:
-    st.write("Som tvoj inteligentný ochranár. Povedz mi, čo sa deje.")
+# --- HLAVNÁ ČASŤ ---
+st.title("🛡️ Aura")
+st.subheader(f"Vitaj, {u_name}. Čo dnes skontrolujeme?")
 
-# SEKCIA: UKÁŽ MI (FOTO aj PDF)
-st.header("👁️ Režim: Ukáž mi")
-
-# 1. Tu sme pridali 'pdf' do zoznamu povolených formátov
-upload = st.file_uploader("Odfoť alebo nahraj dokument (JPG, PNG, PDF)", type=['jpg', 'png', 'jpeg', 'pdf'])
-
-if upload:
-    # Kontrola, či ide o PDF alebo obrázok pre zobrazenie náhľadu
-    if upload.type == "application/pdf":
-        st.write("📄 Súbor PDF bol úspešne nahraný.")
-    else:
-        img = Image.open(upload)
-        st.image(img, caption="Náhľad dokumentu", width=400)
+# Režim: UKÁŽ MI
+with st.expander("👁️ Režim: Ukáž mi (Nahrať dokument)", expanded=True):
+    uploaded_file = st.file_uploader("Vlož fotku (JPG, PNG) alebo PDF zmluvy", type=['jpg', 'jpeg', 'png', 'pdf'])
     
-    if st.button("Analyzuj dokument"):
-        with st.spinner("Aura číta dokument (môže to trvať chvíľu)..."):
-            prompt = "Si Aura, ochranársky asistent. Analyzuj tento dokument. Čo to je? Nájdi 🚩 RIZIKO, ✅ FAKT a 🚀 AKCIA."
-
-            # Pokúsime sa najprv extrahovať text lokálne (PDF alebo OCR z obrázka)
-            extracted_text = None
-            if upload.type == "application/pdf":
-                pdf_data = upload.read()
-                if PyPDF2 is not None:
-                    try:
-                        reader = PyPDF2.PdfReader(io.BytesIO(pdf_data))
-                        pages = [p.extract_text() or "" for p in reader.pages]
-                        extracted_text = "\n".join(pages).strip()
-                    except Exception:
-                        extracted_text = None
-                else:
-                    extracted_text = None
-            else:
-                # obrázok
-                img_obj = Image.open(upload)
-                if pytesseract is not None:
-                    try:
-                        extracted_text = pytesseract.image_to_string(img_obj).strip()
-                    except Exception:
-                        extracted_text = None
-
-            response = None
-            last_exc = None
-            for idx, candidate in enumerate(model_candidates):
+    if uploaded_file:
+        if st.button("Analyzovať dokument"):
+            with st.spinner("Aura dôkladne prezerá dokument..."):
                 try:
-                    model = genai.GenerativeModel(candidate)
-                    # prefer text model when we have extracted text
-                    if candidate.startswith("models/text"):
-                        if extracted_text:
-                            combined = f"{prompt}\n\nExtrahovaný text:\n{extracted_text}"
-                            response = model.generate_content(combined)
-                            break
-                        else:
-                            continue
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    
+                    # Príprava obsahu pre Gemini
+                    content = ["Si Aura, expert na ochranu spotrebiteľa. Analyzuj tento súbor. Identifikuj: 1. Typ dokumentu, 2. 🚩 RIZIKÁ, 3. ✅ KĽÚČOVÉ FAKTY, 4. 🚀 ODPORÚČANÁ AKCIA. Odpovedaj jasne v slovenčine."]
+                    
+                    if uploaded_file.type == "application/pdf":
+                        pdf_parts = [{"mime_type": "application/pdf", "data": uploaded_file.read()}]
+                        content.extend(pdf_parts)
                     else:
-                        # multimodálne modely: poslať pôvodné dáta
-                        if upload.type == "application/pdf":
-                            response = model.generate_content([
-                                prompt,
-                                {'mime_type': 'application/pdf', 'data': pdf_data}
-                            ])
-                        else:
-                            response = model.generate_content([prompt, img_obj])
-                        break
-                except api_exceptions.ResourceExhausted as rex:
-                    last_exc = rex
-                    backoff = min(2 ** idx, 8)
-                    time.sleep(backoff)
-                    continue
-                except api_exceptions.NotFound as nf:
-                    last_exc = nf
-                    continue
+                        img = Image.open(uploaded_file)
+                        content.append(img)
+                    
+                    response = model.generate_content(content)
+                    
+                    # Zobrazenie výsledku
+                    st.markdown("### 📊 Výsledok analýzy")
+                    st.write(response.text)
+                    
+                    # Uloženie do histórie
+                    st.session_state['history'].append(f"Analyzované: {uploaded_file.name}")
+                    
                 except Exception as e:
-                    last_exc = e
-                    continue
-
-            if response is None:
-                if isinstance(last_exc, api_exceptions.ResourceExhausted):
-                    st.error("Kvóta vyčerpaná pre použité modely. Skontroluj fakturáciu / kvóty.")
-                elif isinstance(last_exc, api_exceptions.NotFound):
-                    st.error("Požadované modely nie sú dostupné pre tvoje API/verziu.")
-                else:
-                    st.error(f"Chyba pri volaní modelu: {last_exc}")
-            else:
-                st.session_state['history'].append(f"Dokument: {response.text[:40]}...")
-                st.subheader("Výsledok analýzy:")
-                st.write(response.text)
+                    st.error(f"Nastala chyba pri analýze: {e}")
 
 st.divider()
 
-# SEKCIA: POMÔŽ MI (TEXT)
-st.header("💬 Režim: Pomôž mi")
-problem = st.text_area("Popíš svoju situáciu:")
-
-if st.button("Vyrieš to"):
-    if problem:
-        with st.spinner("Hľadám riešenie..."):
-            response = None
-            last_exc = None
-            for idx, candidate in enumerate(model_candidates):
-                try:
-                    model = genai.GenerativeModel(candidate)
-                    response = model.generate_content(f"Si Aura, ochranár. Vyrieš toto: {problem}")
-                    break
-                except api_exceptions.ResourceExhausted as rex:
-                    last_exc = rex
-                    backoff = min(2 ** idx, 8)
-                    time.sleep(backoff)
-                    continue
-                except api_exceptions.NotFound as nf:
-                    last_exc = nf
-                    continue
-                except Exception as e:
-                    last_exc = e
-                    continue
-
-            if response is None:
-                if isinstance(last_exc, api_exceptions.ResourceExhausted):
-                    st.error("Kvóta vyčerpaná pre použité modely. Skontroluj fakturáciu / kvóty.")
-                elif isinstance(last_exc, api_exceptions.NotFound):
-                    st.error("Požadované modely nie sú dostupné pre tvoje API/verziu.")
-                else:
-                    st.error(f"Chyba pri volaní modelu: {last_exc}")
-            else:
-                st.session_state['history'].append(f"Text: {problem[:40]}...")
+# Režim: POMÔŽ MI
+with st.expander("💬 Režim: Pomôž mi (Popísať problém)"):
+    user_input = st.text_area("Popíš svoju situáciu (napr. 'E-shop mi nechce vrátiť peniaze'):")
+    
+    if st.button("Získať radu"):
+        if user_input:
+            with st.spinner("Hľadám najlepšie riešenie..."):
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                response = model.generate_content(f"Si Aura, asistent ochrany. Navrhni postup pre: {user_input}")
+                st.markdown("### 💡 Odporúčanie Aury")
                 st.write(response.text)
+                st.session_state['history'].append(f"Otázka: {user_input[:30]}...")
