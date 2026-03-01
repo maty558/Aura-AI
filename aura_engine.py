@@ -1,8 +1,9 @@
 import os
 import time
 from dotenv import load_dotenv
-import google.generativeai as genai
+import google.generativeai as genai  # type: ignore[reportPrivateImportUsage]
 from google.api_core import exceptions as api_exceptions
+from typing import Any
 
 # 1. NASTAVENIE (Tu vložíš svoj API kľúč neskôr)
 # Načítaj .env a použij fallback: najprv GOOGLE_API_KEY, potom API_KEY
@@ -21,8 +22,8 @@ model_candidates = [
 ]
 
 # Helper: create a model instance for a given model resource name
-def _make_model(name):
-    return genai.GenerativeModel(name)
+def _make_model(name) -> Any:
+    return genai.GenerativeModel(name)  # type: ignore[reportPrivateImportUsage]
 
 def get_aura_response(user_input, mode="Ukáž mi"):
     full_prompt = f"{mode}: {user_input}"

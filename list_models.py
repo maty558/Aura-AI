@@ -6,17 +6,17 @@ api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("API_KEY")
 if not api_key:
     raise SystemExit("GOOGLE_API_KEY (or API_KEY) not found in .env")
 
-import google.generativeai.client as gen_client
-import google.generativeai as genai
+import google.generativeai.client as gen_client  # type: ignore[reportPrivateImportUsage]
+import google.generativeai as genai  # type: ignore[reportPrivateImportUsage]
 
 # configure
-genai.configure(api_key=api_key)
+genai.configure(api_key=api_key)  # type: ignore[reportPrivateImportUsage]
 
 try:
     client = gen_client.get_default_generative_client()
     # Some client versions don't expose list_models on this object; try and fall back.
     try:
-        resp = client.list_models()
+        resp = client.list_models()  # type: ignore[attr-defined]
         print("Available models (via client):")
         for m in resp.models:
             name = getattr(m, "name", None)

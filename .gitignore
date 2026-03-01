@@ -38,3 +38,6 @@ logs/
 # macOS
 .Spotlight-V100
 .Trashes
+
+# Local backup / duplicate folder
+Aura-AI/
