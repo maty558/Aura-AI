@@ -1,185 +1,116 @@
-"""Streamlit UI pre Aura: nahrávanie a analýza dokumentov a textové poradenstvo.
-
-Obsahuje dve hlavné sekcie: nahratie dokumentu (analýza) a textové otázky
-(poradenstvo). Aplikácia komunikuje s generatívnym API (Gemini).
-"""
-
-# pylint: disable=trailing-newlines
-
-import os
-from typing import Any, List
-
-from dotenv import load_dotenv
 import streamlit as st
 import google.generativeai as genai
+import os
+from dotenv import load_dotenv
 from PIL import Image
+from fpdf import FPDF
+import io
 
-# 1. NASTAVENIA API A KONFIGURÁCIA
+# 1. NASTAVENIA
 load_dotenv()
 API_KEY = os.getenv("GOOGLE_API_KEY")
 
 if not API_KEY:
-    st.error("❌ Chýba API kľúč v súbore .env! Prosím, pridaj ho.")
+    st.error("❌ Chýba API kľúč v .env!")
     st.stop()
 
 genai.configure(api_key=API_KEY)
 
-# Konfigurácia Streamlit stránky
-st.set_page_config(
-    page_title="Aura AI - Ochranár",
-    page_icon="🛡️",
-    layout="wide",
-)
+st.set_page_config(page_title="Aura AI - Ochranár", page_icon="🛡️", layout="wide")
 
+# Funkcia na tvorbu PDF
+def create_pdf(text_content, user_name):
+    pdf = FPDF()
+    pdf.add_page()
+    # Pridanie fontu (štandardné fonty v FPDF nemusia vedieť slovenské diakritiku, 
+    # pre jednoduchosť použijeme 'Helvetica', ale odporúča sa neskôr pridať Unicode font)
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(40, 10, f"Aura AI - Protokol o analyze")
+    pdf.ln(10)
+    pdf.set_font("Helvetica", "", 12)
+    pdf.cell(40, 10, f"Pripravene pre: {user_name}")
+    pdf.ln(15)
+    
+    # Rozdelenie textu na riadky pre PDF
+    pdf.multi_cell(0, 5, text_content.encode('latin-1', 'replace').decode('latin-1'))
+    
+    return pdf.output()
 
-def get_best_model() -> str:
-    """Získať najvhodnejší model z dostupných alebo vrátiť záložný.
-
-    Preferuje modely obsahujúce 'flash', inak prvý dostupný.
-    """
+def get_best_model():
     try:
-        available_models: List[str] = []
-        for m in genai.list_models():
-            if hasattr(m, "supported_generation_methods"):
-                if "generateContent" in m.supported_generation_methods:
-                    if hasattr(m, "name"):
-                        available_models.append(m.name)
-
-        chosen = next((m for m in available_models if "flash" in m), None)
-        if not chosen:
-            chosen = available_models[0] if available_models else "models/gemini-1.5-flash"
-        return chosen
-    except Exception:  # pylint: disable=broad-except
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        return next((m for m in available_models if "flash" in m), available_models[0])
+    except:
         return "models/gemini-1.5-flash"
 
+if 'history' not in st.session_state:
+    st.session_state['history'] = []
 
-# Inicializácia histórie analýz (st.session_state zostáva v pamäti počas relácie)
-if "history" not in st.session_state:
-    st.session_state["history"] = []
-
-
-# --- BOČNÝ PANEL (Sidebar) ---
+# --- SIDEBAR ---
 with st.sidebar:
-    st.title("👤 Profil používateľa")
-    u_name = st.text_input("Meno", value="Používateľ")
-    u_email = st.text_input("E-mail", placeholder="tvoj@email.sk")
-
+    st.title("👤 Profil")
+    u_name = st.text_input("Meno", value="Pouzivatel")
     st.divider()
-    st.subheader("📜 História aktivít")
+    st.subheader("📜 Historia")
+    for entry in reversed(st.session_state['history']):
+        st.info(entry)
 
-    if st.session_state["history"]:
-        for entry in reversed(st.session_state["history"]):
-            st.info(entry)
+# --- HLAVNA CAST ---
+st.title("🛡️ Aura AI - Expert na zmluvy")
 
-        if st.button("🗑️ Vymazať históriu"):
-            st.session_state["history"] = []
-            st.rerun()
-    else:
-        st.write("Zatiaľ žiadna história.")
-
-
-# --- HLAVNÁ ČASŤ APLIKÁCIE ---
-st.title("🛡️ Aura AI")
-st.markdown(
-    f"**Ahoj {u_name}, som tvoj digitálny ochranár.** "
-    "Pomôžem ti preveriť dokumenty alebo poradiť s právami spotrebiteľa."
-)
-
-
-# 1. SEKCIA: UKÁŽ MI (Skenovanie a nahrávanie)
-with st.expander("👁️ Režim: Ukáž mi (Analýza dokumentu)", expanded=True):
-    st.write("Nahraj fotografiu zmluvy, bločku alebo PDF súbor.")
-    uploaded_file = st.file_uploader(
-        "Vyber súbor (JPG, PNG, PDF)", type=["jpg", "jpeg", "png", "pdf"]
-    )
-
-    if uploaded_file:
-        # Zobrazenie náhľadu, ak ide o obrázok
-        if uploaded_file.type != "application/pdf":
-            img_preview = Image.open(uploaded_file)
-            st.image(img_preview, caption="Náhľad dokumentu", width=300)
-        else:
-            st.write("📄 Dokument PDF je pripravený na analýzu.")
-
+# 👁️ REŽIM: UKÁŽ MI (Súbory / Porovnávanie)
+with st.expander("👁️ Režim: Analýza a Porovnávanie", expanded=True):
+    uploaded_files = st.file_uploader("Nahraj jeden alebo dva súbory (PDF/Obrázky)", type=['jpg', 'png', 'pdf'], accept_multiple_files=True)
+    
+    if uploaded_files:
         if st.button("🚀 Spustiť analýzu"):
-            with st.spinner("Aura dôkladne analyzuje obsah dokumentu..."):
+            with st.spinner("Aura pracuje..."):
                 try:
-                    # Dynamické získanie modelu
                     model_name = get_best_model()
                     model = genai.GenerativeModel(model_name)
-
-                    # Definícia inštrukcií pre AI
-                    ANALYSIS_PROMPT = (
-                        "Si Aura, expert na ochranu spotrebiteľa a digitálnu bezpečnosť. "
-                        "Analyzuj tento dokument a štruktúruj odpoveď takto:\n"
-                        "1. Čo je to za dokument?\n"
-                        "2. 🚩 RIZIKÁ (ak nejaké existujú)\n"
-                        "3. ✅ KĽÚČOVÉ FAKTY (termíny, sumy, podmienky)\n"
-                        "4. 🚀 ODPORÚČANÁ AKCIA (čo má používateľ urobiť).\n"
-                        "Odpovedaj v slovenčine, buď stručný a jasný."
-                    )
-
-                    content_to_send: List[Any] = [ANALYSIS_PROMPT]
-
-                    # Spracovanie podľa typu súboru
-                    if uploaded_file.type == "application/pdf":
-                        pdf_bytes = uploaded_file.read()
-                        content_to_send.append(
-                            {"mime_type": "application/pdf", "data": pdf_bytes}
-                        )
+                    
+                    content = []
+                    if len(uploaded_files) == 1:
+                        prompt = "Analyzuj tento dokument. Identifikuj riziká a kľúčové fakty v slovenčine."
+                        f = uploaded_files[0]
+                        if f.type == "application/pdf":
+                            content.append({'mime_type': 'application/pdf', 'data': f.read()})
+                        else:
+                            content.append(Image.open(f))
                     else:
-                        img_data = Image.open(uploaded_file)
-                        content_to_send.append(img_data)
-
-                    # Odoslanie do Gemini
-                    response = model.generate_content(content_to_send)
-
-                    # Zobrazenie výsledku
-                    st.markdown("---")
-                    st.subheader("📊 Výsledok od Aury")
-                    st.markdown(response.text)
-
-                    # Uloženie do histórie
-                    st.session_state["history"].append(
-                        f"Analyzované: {uploaded_file.name}"
+                        prompt = "Porovnaj tieto DVA dokumenty. Nájdi rozdiely, upozorni na zmeny v neprospech spotrebiteľa a napíš, ktorý je výhodnejší. Odpovedaj v slovenčine."
+                        for f in uploaded_files:
+                            if f.type == "application/pdf":
+                                content.append({'mime_type': 'application/pdf', 'data': f.read()})
+                            else:
+                                content.append(Image.open(f))
+                    
+                    content.insert(0, prompt)
+                    response = model.generate_content(content)
+                    
+                    # ZOBRAZENIE VÝSLEDKU
+                    st.markdown("### 📊 Výsledok od Aury")
+                    analysis_text = response.text
+                    st.write(analysis_text)
+                    
+                    # TLAČIDLO NA STIAHNUTIE PDF
+                    pdf_data = create_pdf(analysis_text, u_name)
+                    st.download_button(
+                        label="📥 Stiahnuť analýzu (PDF)",
+                        data=pdf_data,
+                        file_name="Aura_Analyza.pdf",
+                        mime="application/pdf"
                     )
-                except Exception as e:  # pylint: disable=broad-except
-                    st.error(f"Nastala chyba pri komunikácii s AI: {e}")
-
-
-# 2. SEKCIA: POMÔŽ MI (Textové otázky)
-with st.expander("💬 Režim: Pomôž mi (Právna rada)"):
-    st.write(
-        "Popíš svoj problém (napr. 'Chcem vrátiť tovar zakúpený v e-shope pred 10 dňami')."
-    )
-    user_problem = st.text_area("Tvoj problém alebo otázka:")
-
-    if st.button("💡 Získať odporúčanie"):
-        if user_problem:
-            with st.spinner("Hľadám najlepšie riešenie pre teba..."):
-                try:
-                    model_name = get_best_model()
-                    model = genai.GenerativeModel(model_name)
-
-                    ADVICE_PROMPT = (
-                        f"Si Aura, expert na ochranu spotrebiteľa. Navrhni najlepší právny "
-                        f"a praktický postup pre túto situáciu: {user_problem}. "
-                        "Odpovedaj v bodoch v slovenčine."
-                    )
-
-                    response = model.generate_content(ADVICE_PROMPT)
-
-                    st.markdown("---")
-                    st.subheader("💡 Odporúčanie Aury")
-                    st.markdown(response.text)
-
-                    # Uloženie do histórie
-                    st.session_state["history"].append(f"Otázka: {user_problem[:30]}...")
-                except Exception as e:  # pylint: disable=broad-except
+                    
+                    st.session_state['history'].append(f"Analyza: {len(uploaded_files)} subor(ov)")
+                    
+                except Exception as e:
                     st.error(f"Chyba: {e}")
 
-        else:
-            st.warning("Prosím, napíš najprv svoj problém.")
-
-
-
+# 💬 REŽIM: POMÔŽ MI
+with st.expander("💬 Režim: Rýchla rada"):
+    user_q = st.text_area("Otázka:")
+    if st.button("Poraď"):
+        model = genai.GenerativeModel(get_best_model())
+        resp = model.generate_content(user_q)
+        st.write(resp.text)
