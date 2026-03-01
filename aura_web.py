@@ -94,7 +94,8 @@ with st.expander("👁️ Režim: Ukáž mi (Analýza dokumentu)", expanded=True
                         "Odpovedaj v slovenčine, buď stručný a jasný."
                     )
                     
-                    content_to_send = [prompt]
+                    content_to_send = []
+                    content_to_send.append(prompt)
                     
                     # Spracovanie podľa typu súboru
                     if uploaded_file.type == "application/pdf":

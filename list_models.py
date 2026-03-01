@@ -1,20 +1,28 @@
+"""Utility to list available generative models for the configured API key.
+
+Attempts to use the client library and falls back to a REST call when
+necessary.
+"""
+
 import os
+
 from dotenv import load_dotenv
+
+import google.generativeai.client as gen_client  # type: ignore[reportPrivateImportUsage]  # pylint: disable=no-name-in-module
+import google.generativeai as genai  # type: ignore[reportPrivateImportUsage]
 
 load_dotenv()
 api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("API_KEY")
 if not api_key:
     raise SystemExit("GOOGLE_API_KEY (or API_KEY) not found in .env")
 
-import google.generativeai.client as gen_client  # type: ignore[reportPrivateImportUsage]
-import google.generativeai as genai  # type: ignore[reportPrivateImportUsage]
-
-# configure
+# configure SDK
 genai.configure(api_key=api_key)  # type: ignore[reportPrivateImportUsage]
 
 try:
     client = gen_client.get_default_generative_client()
-    # Some client versions don't expose list_models on this object; try and fall back.
+    # Some client versions don't expose list_models on this object;
+    # try and fall back.
     try:
         resp = client.list_models()  # type: ignore[attr-defined]
         print("Available models (via client):")
@@ -25,13 +33,19 @@ try:
     except AttributeError:
         # Fallback: call REST endpoint directly using requests
         import requests
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+        )
         r = requests.get(url, timeout=20)
         r.raise_for_status()
         data = r.json()
         print("Available models (via REST):")
         for item in data.get("models", []):
-            print(item.get("name"), item.get("supportedMethods") or item.get("supported_methods"))
+            print(
+                item.get("name"),
+                item.get("supportedMethods") or item.get("supported_methods"),
+            )
 except Exception as e:
     print("Error while listing models:", e)
     raise
